@@ -48,9 +48,6 @@ Missing_diet_adult_df <- adult_dataset %>%
 children_dataset <- children_dataset %>%
   filter(!(pid %in% Missing_diet_child_df$pid))
 
-#Clean environment
-rm(Missing_diet_adult_df, Missing_diet_child_df,diet_columns)
-
 #**_____________________________________**#
 ## ----- 2. MISSING SLEEP DATA --------- ##
 
@@ -176,5 +173,36 @@ excluded_children <- read.csv("final_child.csv") %>%
 
 Exclusions <- list(Missing_Data = list(Adult = excluded_adults, Children = excluded_children))
 
+#Generate some df's for keeping tidy in our environment
+adult_sleep <- adult_dataset %>%
+  select(pid,all_of(sleep_columns))
+
+children_sleep <- children_dataset %>%
+  select(pid,all_of(sleep_columns))
+
+children_diet <- children_dataset %>%
+  select(pid,all_of(sleep_columns))
+
+adult_diet <- adult_dataset %>%
+  select(pid,all_of(diet_columns))
+
+children_diet <- children_dataset %>%
+  select(pid,all_of(diet_columns))
+
+#Define remaining columns not identified as demo_columns for demographic
+demo_columns_adult <- setdiff(colnames(adult_dataset) , c(snp_columns, diet_columns, sleep_columns))
+
+demo_columns_children <- setdiff(colnames(children_dataset) , c(snp_columns, diet_columns, sleep_columns))
+
+adult_demos <- adult_dataset %>%
+  select(pid, all_of(demo_columns_adult))
+
+children_demos <- children_dataset %>%
+  select(pid, all_of(demo_columns_children))
+
+'Sleep Data' <- list(Adult = adult_sleep, Children = children_sleep)
+'Diet Data' <- list(Adult = adult_diet, Children = children_diet)
+'Demographic Data' <- list(Adult = adult_demos, Children = children_demos)
+
 #Clean Env
-rm(adult_dataset,children_dataset,Missing_snp_adult_df,Missing_snp_child_df, unique_snps_adult, unique_snps_children, excluded_children, excluded_adults)
+rm(adult_dataset,children_dataset,Missing_snp_adult_df,Missing_snp_child_df, unique_snps_adult, unique_snps_children, excluded_children, excluded_adults, Missing_diet_adult_df, Missing_diet_child_df, diet_columns,sleep_columns, adult_diet,adult_sleep,children_diet,children_sleep,adult_demos,children_demos)
