@@ -14,7 +14,7 @@ install_if_needed <- function(package_name) {
 }
 
 #Create vector with packages
-packages <- c("tidyverse", "ggplot2", "readxl", "broom", "data.table", "rentrez", "writexl", "snpStats", "LDheatmap", "lubridate", "rstudioapi")
+packages <- c("tidyverse", "ggplot2", "readxl", "broom", "data.table", "rentrez", "writexl", "snpStats", "LDheatmap", "lubridate", "rstudioapi", "data.table")
 
 #Nest function in loop and load libraries
 for (pkg in packages) {
@@ -27,10 +27,9 @@ project_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
 #FILE AND SCRIPT ID MAPPING
 
 SNP_Selection <- 1
-Genotype_Data_Processing <- 2
-Data_Integration <- 3
-Dataset_Cleaning <- 4
-SNP_Stats_Filtering <- 5
+Data_Integration <- 2
+Dataset_Cleaning <- 3
+SNP_Stats_Filtering <- 4
 
 #GLOBAL FUNCTIONS AND VARIABLES
 
