@@ -16,16 +16,13 @@ Output_Dir <- set_dir(SNP_Stats_Filtering)
 setwd(Input_Dir)
 
 #Read in data
-adult_dataset <- read.csv("final_adult.csv") %>%
-  select(-X)
-children_dataset <- read.csv("final_child.csv")%>%
-  select(-X)
+adult_dataset <- read.csv("final_adult.csv")
+children_dataset <- read.csv("final_child.csv")
 
 #We will now remove participants that have notable amounts of missing data across any of the essential dietary, sleep and genetic data columns
 
 #**_____________________________________**#
 ## ----- 1. MISSING DIETARY DATA ------- ##
-
 
 #First make a general function to check for any form of missing data in a given column
 check_missing <- function(column) {
@@ -35,7 +32,7 @@ check_missing <- function(column) {
 #Examine how many participants are missing data in any of the dietary columns.
 
 #Make a list of dietary columns to check
-diet_columns <- c("kcal", "prot", "tfat", "carb", "caff")
+diet_columns <- c("kcal", "prot", "tfat", "carb", "caff", "carb_prop", "prot_prop", "tfat_prop")
 
 #Now apply our function over these columns in both children and adults, extracting into filtered dataframes for examination
 Missing_diet_child_df <- children_dataset %>%
@@ -44,15 +41,37 @@ Missing_diet_child_df <- children_dataset %>%
 Missing_diet_adult_df <- adult_dataset %>%
   filter(apply(select(., all_of(diet_columns)), 1, function(row) any(check_missing(row))))
 
-#We will remove the participants missing dietary information in the childrens dataset
+adult_dataset <- adult_dataset %>%
+  rename(age = "age_ha") #provide standard name for age and other cols between adult and childrens data
+
 children_dataset <- children_dataset %>%
-  filter(!(pid %in% Missing_diet_child_df$pid))
+  rename(age = "age_years") %>%
+  rename(bmi = "bmi_z")
+
+#Also checking on our covariate columns
+Missing_demos_child_df <- children_dataset %>%
+  filter(apply(select(., all_of(covariates)), 1, function(row) any(check_missing(row))))
+
+Missing_demos_adult_df <- adult_dataset %>%
+  filter(apply(select(., all_of(covariates)), 1, function(row) any(check_missing(row))))
+
+#Now filtering for missing data in diet and demos columns
+
+children_dataset <- children_dataset %>%
+  filter(!(pid %in% Missing_diet_child_df$pid)) %>%
+  filter(!(pid %in% Missing_demos_child_df))
+
+adult_dataset <- adult_dataset %>%
+  filter(!(pid %in% Missing_diet_adult_df$pid)) %>%
+  filter(!(pid %in% Missing_demos_adult_df))
+
+
 
 #**_____________________________________**#
 ## ----- 2. MISSING SLEEP DATA --------- ##
 
 #List our sleep columns and apply function to create df's for missing sleep data
-sleep_columns <- c("Nights", "Mean_TST", "Mean_SE", "Mean_WASO", "Mean_TIB", "mean_IN_TIME_24", "mean_OUT_TIME_24")
+sleep_columns <- c("Nights", "Mean_TST", "Mean_SE", "Mean_WASO", "Mean_TIB", "mean_IN_TIME_24", "mean_OUT_TIME_24", "SD_sleep_onset", "SD_sleep_offset", "SD_SE", "SD_TST", "Regularity")
 
 #Looking at missing values in each sleep column
 adult_sleep_nacount <- as.data.frame(colSums(is.na(adult_dataset[sleep_columns])))
@@ -83,6 +102,24 @@ adult_sleep_nacount <- as.data.frame(colSums(is.na(adult_dataset[sleep_columns])
 children_sleep_nacount <- as.data.frame(colSums(is.na(children_dataset[sleep_columns])))
 
 #We see there are no missing values in the adult dataset, and only the time in bed column is missing values in the children dataset - which we will accept at this time.
+
+#We will however remove participants with fewer than 3 nights logged
+too_few_nights_a <- adult_dataset %>%
+  filter(Nights <= 3) %>%
+  select(pid, Nights)
+
+too_few_nights_c <- children_dataset %>%
+  filter(Nights <= 3) %>%
+  select(pid, Nights)
+
+too_few_nights <- rbind(too_few_nights_a,too_few_nights_c)
+
+#Remove from datasets
+adult_dataset <- adult_dataset %>%
+  filter(!(pid %in% too_few_nights$pid))
+
+children_dataset <- children_dataset  %>%
+  filter(!(pid %in% too_few_nights$pid))
 
 #Cleaning env.
 rm(Missing_sleep_child_df,Missing_sleep_adult_df,children_sleep_nacount,adult_sleep_nacount)
@@ -158,20 +195,18 @@ Missing_snp_child_df <- children_dataset %>%
 setwd(Output_Dir)
 
 #Write output files into folder for next step of pipeline
-write.csv(adult_dataset, "adult_preprocessed.csv")
-write.csv(children_dataset, "children_preprocessed.csv")
+write.csv(adult_dataset, "adult_preprocessed.csv", row.names = FALSE)
+write.csv(children_dataset, "children_preprocessed.csv",row.names = FALSE)
 
 setwd(Input_Dir)
 
 excluded_adults <- read.csv("final_adult.csv") %>%
-  select(-X) %>%
   filter(!(pid %in% adult_dataset$pid))
 
 excluded_children <- read.csv("final_child.csv") %>%
-  select(-X) %>%
   filter(!(pid %in% children_dataset$pid))
 
-Exclusions <- list(Missing_Data = list(Adult = excluded_adults, Children = excluded_children))
+Exclusions <- list(Missing_Data = list(Adult = excluded_adults, Children = excluded_children), '<= 3 Nights Sleep' = list(Adult = too_few_nights_a, Children = too_few_nights_c))
 
 #Generate some df's for keeping tidy in our environment
 adult_sleep <- adult_dataset %>%
@@ -196,13 +231,23 @@ demo_columns_children <- setdiff(colnames(children_dataset) , c(snp_columns, die
 
 adult_demos <- adult_dataset %>%
   select(pid, all_of(demo_columns_adult))
+ 
 
 children_demos <- children_dataset %>%
   select(pid, all_of(demo_columns_children))
+
+
+children_demos_na <- children_demos %>%
+  filter(is.na(bmi) | bmi == " " | bmi == "NA")
+nrow(children_demos_na)
+
+adult_demos_na <- adult_demos %>%
+  filter(is.na(bmi) | bmi == " " | bmi == "NA")
+nrow(adult_demos_na)
 
 'Sleep Data' <- list(Adult = adult_sleep, Children = children_sleep)
 'Diet Data' <- list(Adult = adult_diet, Children = children_diet)
 'Demographic Data' <- list(Adult = adult_demos, Children = children_demos)
 
 #Clean Env
-rm(adult_dataset,children_dataset,Missing_snp_adult_df,Missing_snp_child_df, unique_snps_adult, unique_snps_children, excluded_children, excluded_adults, Missing_diet_adult_df, Missing_diet_child_df, diet_columns,sleep_columns, adult_diet,adult_sleep,children_diet,children_sleep,adult_demos,children_demos)
+rm(adult_dataset,children_dataset,Missing_snp_adult_df,Missing_snp_child_df, unique_snps_adult, unique_snps_children, excluded_children, excluded_adults, Missing_diet_adult_df, Missing_diet_child_df, diet_columns,sleep_columns, adult_diet,adult_sleep,children_diet,children_sleep,adult_demos,children_demos, too_few_nights_a,too_few_nights_c, too_few_nights, Missing_demos_adult_df, Missing_demos_child_df)

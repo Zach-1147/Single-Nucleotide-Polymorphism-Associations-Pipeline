@@ -9,6 +9,7 @@
 source(file.path(dirname(rstudioapi::getActiveDocumentContext()$path), "Config", "config.R"))
 
 Input_Dir <- set_dir(SNP_Stats_Filtering)
+Output_Dir <- set_dir(Association_Testing)
 
 #**___________________________________________________**#
 ## --------------------- DATA ------------------------ ##
@@ -163,6 +164,23 @@ children_snp_stats <- Genotype_long_children %>%
     )
   )
 
+#Filtering based on MAF
+exclude_snps_adult <- adult_snp_stats %>%
+  filter(Minor_Allele_Prop < minor_allele_threshold) %>%
+  rename(MAF_adult = "Minor_Allele_Prop") %>%
+  select(rsID, MAF_adult)
+
+exclude_snps_children <- children_snp_stats %>%
+  filter(Minor_Allele_Prop < minor_allele_threshold) %>%
+  rename(MAF_children = "Minor_Allele_Prop") %>%
+  select(rsID, MAF_children)
+
+#This will be used to remove snps at the end of the script
+exclude_snps_df <- full_join(exclude_snps_adult, exclude_snps_children, by = "rsID") %>%
+  distinct(rsID, MAF_children, MAF_adult)
+
+exclude_snps <- as.character(exclude_snps_df$rsID)
+
 #**_____________________________________________________**#
 ## ------------ 2. LINKAGE DIS-EQUILIBRIUM ------------- ##
 
@@ -222,6 +240,27 @@ ld_results_children <- ld(snp_matrix_children, depth=10, stats=c("D.prime", "R.s
 ld_D_prime_child <- as.data.frame(as.matrix(ld_results_children[["D.prime"]]))
 ld_R_squared_child <- as.data.frame(as.matrix(ld_results_children[["R.squared"]]))
 
+Genotype_matrix_adult <- rownames_to_column(as.data.frame(Genotype_matrix_adult), var = "pid")
+
+Genotype_matrix_children <- rownames_to_column(as.data.frame(Genotype_matrix_children), var = "pid")
+
+#**_____________________________________________________**#
+## -------------- 3. CRITERIA FILTERING ---------------- ##
+
+#Filtering out low minor allele frequency based on config variable
+Genotype_matrix_adult <- Genotype_matrix_adult %>%
+  select(-all_of(exclude_snps))
+
+#Filtering out low minor allele frequency based on config variable
+Genotype_matrix_children <- Genotype_matrix_children %>%
+  select(-all_of(exclude_snps))
+
+print(paste(as.character(nrow(exclude_snps_df)), "SNPs excluded based on minor allele frequency < ", minor_allele_threshold))
+
+#**_____________________________________________________**#
+## -------------- 4. DATA ORGANIZATION ----------------- ##
+
+#Save everything to orderly list in environment
 Genetic_STATS <- list(
   Adults = list(
     "Genotype Table" = Genotype_adult,
@@ -243,10 +282,69 @@ Genetic_STATS <- list(
       "LD D-Prime" = ld_D_prime_child,
       "LD R-Sqr" = ld_R_squared_child
     )
-  )
+  ), 
+  
+  'Excluded SNPs' = exclude_snps_df
 )
 
-#Clean Env
-rm(adult_snp_stats, children_snp_stats, Genotype_long_adult, Genotype_long_children,ld_D_prime_adult, ld_R_squared_adult, ld_results_adult, Genotype_matrix_adult, ld_results_children, ld_D_prime_child, ld_R_squared_child, Genotype_matrix_children, Genotype_adult, Genotype_children)
+Database <- list("Genetic Stats" = Genetic_STATS, "Diet Data" = `Diet Data`, "Sleep Data" = `Sleep Data`, "Demographic Data" = `Demographic Data`, "Exclusions" = Exclusions)
+
+rm(Genetic_STATS, `Diet Data`, `Sleep Data`, `Demographic Data`, Exclusions)
+
+#Read in genotype matrix data from environment
+a_genotype <- Database[["Genetic Stats"]][["Adults"]][["Genotype Matrix"]]
+a_diet <- Database[["Diet Data"]][["Adult"]]
+a_sleep <- Database[["Sleep Data"]][["Adult"]]
+a_demos <- Database[["Demographic Data"]][["Adult"]]
+
+#Ensure PID is identical for all subsets of the data
+all.equal(a_genotype$pid, a_diet$pid, a_sleep$pid,a_demos$pid)
+
+#Merge into complete dataframe
+adult_data <- merge(a_diet, a_sleep, by = "pid", all.x = TRUE)
+adult_data <- merge(adult_data, a_demos, by = "pid", all.x = TRUE)
+adult_data <- merge(adult_data, a_genotype, by = "pid", all.x = TRUE)
+
+#And now for childrens data
+#Read in genotype matrix data from environment
+c_genotype <- Database[["Genetic Stats"]][["Children"]][["Genotype Matrix"]]
+
+#Read in genotype matrix data from environment
+c_diet <- Database[["Diet Data"]][["Children"]]
+c_sleep <- Database[["Sleep Data"]][["Children"]]
+c_demos <- Database[["Demographic Data"]][["Children"]]
+
+all.equal(c_genotype$pid, c_diet$pid, c_sleep$pid, c_demos$pid)
+
+children_data <- merge(c_diet, c_sleep, by = "pid", all.x = TRUE)
+children_data <- merge(children_data, c_demos, by = "pid", all.x = TRUE)
+children_data <- merge(children_data, c_genotype, by = "pid", all.x = TRUE)
+
+#Clean env
+rm(a_genotype,a_diet,a_demos,a_sleep,c_genotype,c_diet,c_sleep,c_demos)
+
+#reassign snp_columns with excluded snps removed
+snp_columns <- get_snp_columns(adult_data)
+
+adult_merge <- adult_data %>%
+  select(pid,fid,all_of(diet_response_columns), all_of(sleep_response_columns), all_of(snp_columns), all_of(covariates)) %>%
+  mutate(cohort = "Adults") #Add dataset indicator to support population clustering of siblings and parents
+
+children_merge <- children_data %>%
+  select(pid,fid,all_of(diet_response_columns), all_of(sleep_response_columns), all_of(snp_columns), all_of(covariates)) %>%
+  mutate(cohort = "Children")
+
+full_cohort_data <- rbind(adult_merge, children_merge)
+
+#Adding to database list object
+Database <- c(Database, list('Complete Datasets' = list("Adults" = adult_data, "Children" = children_data, "Full Cohort" = full_cohort_data)))
+
+rm(adult_merge,children_merge, full_cohort_data, adult_data, children_data)
 
 #NEED TO REVIEW DOCUMENTATION FOR NAs in resulting dataframes here.
+
+#AT THE END
+
+#Clean Env
+
+rm(adult_snp_stats, children_snp_stats, Genotype_long_adult, Genotype_long_children,ld_D_prime_adult, ld_R_squared_adult, ld_results_adult, Genotype_matrix_adult, ld_results_children, ld_D_prime_child, ld_R_squared_child, Genotype_matrix_children, Genotype_adult, Genotype_children, adult_preprocessed, child_preprocessed, exclude_snps_adult, exclude_snps_children, exclude_snps_df)

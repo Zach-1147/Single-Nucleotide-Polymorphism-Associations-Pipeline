@@ -34,6 +34,11 @@ all.equal(one,two) #Should this print TRUE, we can proceed and remove children_d
 
 rm(children2,one,two)
 
+#Force all participant IDs to have 0's in place of O's
+adult$pid <- sub("O", "0", adult$pid)
+children$pid <- sub("O", "0", children$pid)
+sleep$username <- sleep$username <- sub("O", "0", sleep$username)
+
 #**________________________________________________________**#
 ## ----------------- 1. GENOTYPE DATA PREP ---------------- ##
 
@@ -42,6 +47,11 @@ genotype_file <- as.data.frame(t(genotype_file))
 colnames(genotype_file) <- genotype_file[1,] #Set SNP ids as column names
 genotype_file <- genotype_file[-1,] #Remove SNP id column now
 genotype_file <- genotype_file %>% rownames_to_column(var = "pid")
+colnames(genotype_file) <- genotype_file[1, ]
+genotype_file <- genotype_file[-1, ] %>%
+  rename(pid = "SNPS")
+
+genotype_file$pid <- sub("O", "0", genotype_file$pid)
 
 #**____________________________________________________**#
 ## ----------------- 2. SLEEP DATA PREP  -------------- ##
@@ -49,14 +59,23 @@ genotype_file <- genotype_file %>% rownames_to_column(var = "pid")
 #Now we will process the time columns to support operations such as taking the mean, to express tendency for later versus early wake/sleep times.
 
 #Convert the time columns to representations of time since midnight
-
-#Calculate the mean time in minutes for each user and each column, first converting time formats accordingly
 sleep <- sleep %>%
   mutate(
-    IN_TIME = as.POSIXct(IN_TIME_24, format="%H:%M"),
-    OUT_TIME = as.POSIXct(OUT_TIME_24, format="%H:%M"),
-    IN_TIME_minutes = hour(IN_TIME) * 60 + minute(IN_TIME),
-    OUT_TIME_minutes = hour(OUT_TIME) * 60 + minute(OUT_TIME)
+    IN_DATETIME = as.POSIXct(paste(IN_DATE_TIME, IN_TIME), format="%Y-%m-%d %I:%M %p"),
+    OUT_DATETIME = as.POSIXct(paste(OUT_DATE_TIME, OUT_TIME), format="%Y-%m-%d %I:%M %p"),
+    IN_TIME_minutes = hour(IN_DATETIME) * 60 + minute(IN_DATETIME), #calculate minutes from midnight
+    OUT_TIME_minutes = hour(OUT_DATETIME) * 60 + minute(OUT_DATETIME)
+  )
+
+#Adjust for relativity around minute for later calc of standard dev
+sleep <- sleep %>%
+  mutate(
+    adjusted_IN_TIME_minutes = if_else(hour(IN_DATETIME) < 12, 1440 - IN_TIME_minutes, IN_TIME_minutes)
+  )
+
+sleep <- sleep %>%
+  mutate(
+    adjusted_OUT_TIME_minutes = if_else(hour(OUT_DATETIME) < 12, 1440 - OUT_TIME_minutes, OUT_TIME_minutes)
   )
 
 #Compute mean minutes from midnight for each user
@@ -67,19 +86,19 @@ mean_times <- sleep %>%
     mean_OUT_TIME_minutes = mean(OUT_TIME_minutes, na.rm = TRUE)
   )
 
-#Reconstruct hour time of seconds and minutes into 24 hour time format
+#Reconstruct hour and minute time into 24-hour time format
 mean_times <- mean_times %>%
   mutate(
-    mean_IN_HOUR = floor(mean_IN_TIME_minutes / 60),
-    mean_IN_MINUTE = round(mean_IN_TIME_minutes %% 60),
-    mean_OUT_HOUR = floor(mean_OUT_TIME_minutes / 60),
-    mean_OUT_MINUTE = round(mean_OUT_TIME_minutes %% 60),
+    mean_IN_HOUR = as.integer(floor(mean_IN_TIME_minutes / 60)),
+    mean_IN_MINUTE = as.integer(round(mean_IN_TIME_minutes %% 60)),
+    mean_OUT_HOUR = as.integer(floor(mean_OUT_TIME_minutes / 60)),
+    mean_OUT_MINUTE = as.integer(round(mean_OUT_TIME_minutes %% 60)),
     mean_IN_TIME_24 = sprintf("%02d:%02d", mean_IN_HOUR, mean_IN_MINUTE),
     mean_OUT_TIME_24 = sprintf("%02d:%02d", mean_OUT_HOUR, mean_OUT_MINUTE)
   ) %>%
   select(username, mean_IN_TIME_24, mean_OUT_TIME_24)
 
-#Now summarize with additional means of sleep columns, as well as total wear nights
+#Now summarize with  means of sleep columns, as well as total wear nights
 sleep_summary <- sleep %>%
   group_by(username) %>%
   summarise(
@@ -90,18 +109,40 @@ sleep_summary <- sleep %>%
     Mean_TIB = mean(TIB, na.rm = TRUE)
   )
 
-#Combine with mean wake and sleep times, first converting 0 to Os in username column for merge with final dataset
-sleep_summary$username <- sub("0", "O", sleep_summary$username)
-mean_times$username <- sub("0", "O", mean_times$username)
+#We can now incorporate a measure of sleep regularity via an aggregation of variability for duration, sleep onset, sleep offset, and sleep midpoint, suing standard deviation as per Fischer et al 2021: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC8503839/
 
-#Join them to make final sleep dataframe
+#Define which columns
+regularity_data <- sleep %>%
+  group_by(username) %>%
+  summarise(
+    SD_sleep_onset = sd(adjusted_IN_TIME_minutes, na.rm = TRUE),
+    SD_sleep_offset = sd(adjusted_OUT_TIME_minutes, na.rm = TRUE),
+    SD_TST = sd(TST, na.rm = TRUE),
+    SD_SE = sd(SE, na.rm = TRUE)
+  )
+
+#Now create an overall regularity score by taking a mean of each participants min-max scaled sd across each column - subtracting from 1 to flip the relationship so that higher values correspond to more regular sleep patterns. 
+regularity_data <- regularity_data %>%
+  mutate(
+    Regularity = 1 - rowMeans(cbind(
+      (SD_sleep_onset - min(SD_sleep_onset, na.rm = TRUE)) / 
+        (max(SD_sleep_onset, na.rm = TRUE) - min(SD_sleep_onset, na.rm = TRUE)),
+      (SD_sleep_offset - min(SD_sleep_offset, na.rm = TRUE)) / 
+        (max(SD_sleep_offset, na.rm = TRUE) - min(SD_sleep_offset, na.rm = TRUE)),
+      (SD_TST - min(SD_TST, na.rm = TRUE)) / 
+        (max(SD_TST, na.rm = TRUE) - min(SD_TST, na.rm = TRUE)),
+      (SD_SE - min(SD_SE, na.rm = TRUE)) / 
+        (max(SD_SE, na.rm = TRUE) - min(SD_SE, na.rm = TRUE))
+    ), na.rm = TRUE)
+  )
+
+#Combine all sleep data
 sleep_summary <- left_join(sleep_summary, mean_times, by = "username")
+sleep_summary <- left_join(sleep_summary, regularity_data, by = "username")
 
 #Rename username column for later merge
 sleep_summary <- sleep_summary %>%
   rename(pid = username)
-
-rm(mean_times)
 
 #**__________________________________________________________**#
 ## ---------- 3. DEMOGRAPHIC AND DIETARY DATA PREP ---------- ##
@@ -190,14 +231,34 @@ children <- children %>%
 adult <- adult %>%
   select(-Reason_For_Sleep, -Supplement_Affecting_Sleep)
 
-adult$pid <- sub("0", "O", adult$pid)
-children$pid <- sub("0", "O", children$pid)
+#Now prepare macro nutrient proportion columns, starting with a function we can recycle.
 
-genotype_file$pid <- sub("0", "O", genotype_file$pid)
+#Now apply to macronutrient columns for both datastes
+macros <- c("prot", "carb", "tfat")
+multipliers <- c(prot = 4, carb = 4, tfat = 9)
+
+#Use a loop since it's a small vector
+for (macro in macros) {
+  proportion_column <- paste0(macro, "_prop")
+  adult[[proportion_column]] <- adult[[macro]] * multipliers[[macro]] / adult[["kcal"]]
+  
+  # Reorder the columns to place the new column next to the original column
+  adult <- adult %>%
+    select(1:all_of("caff"), all_of(proportion_column), everything())
+}
+
+#and for childen
+for (macro in macros) {
+  proportion_column <- paste0(macro, "_prop")
+  children[[proportion_column]] <- children[[macro]] * multipliers[[macro]] / children[["kcal"]]
+  
+  # Reorder the columns to place the new column next to the original column
+  children <- children %>%
+    select(1:all_of("caff"), all_of(proportion_column), everything())
+}
 
 #**____________________________________________**#
 ## ------------ 4. MERGING DATA --------------- ##
-
 
 #First join demographic/diet data with sleep data
 final_adult <- left_join(adult, sleep_summary, by = "pid")
@@ -210,8 +271,8 @@ final_child <- left_join(final_child, genotype_file, by = "pid")
 #Write final datasets to CSV in folder for next step, Dataset cleaning
 setwd(Output_Dir)
 
-write.csv(final_adult, "final_adult.csv")
-write.csv(final_child, "final_child.csv")
+write.csv(final_adult, "final_adult.csv",  row.names = FALSE)
+write.csv(final_child, "final_child.csv", row.names = FALSE)
 
 #Clean Env
-rm(final_adult,final_child,genotype_file,sleep,sleep_summary,adult,children,sleep_reasons,Supp_Reasons,unique_values_adult,supps)
+rm(final_adult,final_child,genotype_file,sleep,sleep_summary,adult,children,sleep_reasons,Supp_Reasons,unique_values_adult,supps, macros, multipliers, regularity_data, mean_times)

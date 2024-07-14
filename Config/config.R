@@ -1,9 +1,34 @@
-#************** PARAMETERS ****************#
 
-#Variable to use real or scrambeled (not real) data. Set to TRUE to use scrambled data.
+
+#**________________________________________________________**#
+## ------------- 1. MODIFIABLE PARAMETERS ----------------- ##
+
+#Now specify columns in each phenotype category to incorporate into model formulas
+diet_response_columns <- c("kcal", "carb_prop", "prot_prop", "tfat_prop", "carb", "prot", "tfat", "caff") # Add more response columns as needed
+sleep_response_columns <- c("Mean_TST", "Mean_SE", "Mean_WASO", "Regularity") #Add more response columns as needed
+
+covariates = c("age", "sex")
+
+minor_allele_threshold <- 0.05
+p_value_threshold <- 0.05
+
+
+#Variable to use real or scrambled (not real) data. Set to TRUE to use scrambled data.
 scramble_data <- FALSE
 
-#************** NOTHING BELOW NEEDS TO BE CHANGED ****************#
+#**________________________________________________________**#
+## --------- 2. LOCKED FUNCTIONS & VARIABLES -------------- ##
+
+
+#************** GLOBAL VARIABLES ****************#
+#This will dynamically set the project_dir to the location of the script accessing this CONFIG script.
+project_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
+
+#vector with packages
+packages <- c("tidyverse", "ggplot2", "readxl", "broom", "data.table", "rentrez", "writexl", "snpStats", "LDheatmap", "lubridate", "rstudioapi", "data.table", "geepack", "car")
+
+
+#****************** FUNCTIONS ********************#
 
 #Function load libraries or install where needed
 install_if_needed <- function(package_name) {
@@ -13,16 +38,10 @@ install_if_needed <- function(package_name) {
   }
 }
 
-#Create vector with packages
-packages <- c("tidyverse", "ggplot2", "readxl", "broom", "data.table", "rentrez", "writexl", "snpStats", "LDheatmap", "lubridate", "rstudioapi", "data.table")
-
 #Nest function in loop and load libraries
 for (pkg in packages) {
   install_if_needed(pkg)
 }
-
-#This will dynamically set the project_dir to the location of the script accessing this CONFIG script.
-project_dir <- dirname(rstudioapi::getActiveDocumentContext()$path)
 
 #FILE AND SCRIPT ID MAPPING
 
@@ -30,8 +49,7 @@ SNP_Selection <- 1
 Data_Integration <- 2
 Dataset_Cleaning <- 3
 SNP_Stats_Filtering <- 4
-
-#GLOBAL FUNCTIONS AND VARIABLES
+Association_Testing <- 5
 
 #This function dynamically locates a scripts input directory based on the number in the name of the folder - which must macth the number in the name of the script.
 set_dir <- function(script_id) {

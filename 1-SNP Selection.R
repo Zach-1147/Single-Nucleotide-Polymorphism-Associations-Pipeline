@@ -65,14 +65,27 @@ sleep_diet_SNPs <- rbind(common_sleep_SNPs, common_diet_SNPs) %>%
   group_by(SNPS, MAPPED_GENE) %>%
   summarise(traits = paste(unique(MAPPED_TRAIT), collapse = ", "),.groups = 'drop')
 
+#Now bring in external list of SNPs identified via other means (literature review, etc...)
+
+ext_snps <- read.table("SNP_List.txt", skip = 1)
+colnames(ext_snps) <- 'SNP'
+
+#add to EBI snp_list
+
 #Generate a simple dataframe list of the final set of SNPs of interest
-snp_list <- sleep_diet_SNPs$SNPS
+SNP_List <- as.data.frame(sleep_diet_SNPs$SNPS)
+colnames(SNP_List) = "SNP"
+
+#Adding external snps
+SNP_List <- rbind(SNP_List, ext_snps) %>%
+  distinct(SNP)
 
 #**_____________________________________________________**#
 ## ----------- 2. GENOTYPE FILE PREPROCESSING ---------- ##
 
 #Now create df with SNP and a new blank column to look up alt names for each SNP to ensure matches where they exist in the genotype file.
-SNP_List <- data.frame(SNP = snp_list$SNPS, Alt_name = NA)
+SNP_List <- SNP_List %>%
+  mutate(Alt_name = NA)
 
 #Trim whitespace to ensure no matches are missed due to this
 SNP_List$SNP <- trimws(SNP_List$SNP)
@@ -121,7 +134,3 @@ filter_genotype <- genotype_file %>%
 setwd(Output_Dir)
 
 write.csv(filter_genotype, "filtered_genotype_file.csv")
-
-colnames(genotype_file) <- colnames(filter_genotype_file)
-
-write.table(genotype_file, "genotype_file3.txt", row.names = FALSE, quote = FALSE, sep = "\t")
