@@ -19,7 +19,6 @@ adult_data <- Database[["Complete Datasets"]][["Adults"]]
 children_data <- Database[["Complete Datasets"]][["Children"]]
 full_cohort_data <- Database[["Complete Datasets"]][["Full Cohort"]]
 
-
 #Re-evaluate SNP columns using function from config script
 snp_columns <- get_snp_columns(full_cohort_data)
 
@@ -29,14 +28,15 @@ children_data[snp_columns] <- lapply(children_data[snp_columns], as.numeric)
 
 #Function to fit General Linear Models (GLMs) in Adult subset
 fit_glms <- function(response, snp_columns, covariates, data) {
- 
-#Formula construction
+  
+  #Formula construction
   snp_formula <- paste(snp_columns, collapse = " + ")
   response_formula <- paste(response, "~")
   covariates_str <- paste(covariates, collapse = " + ")
-      
-      #Combine components into formula that will execute model fitting when used in below
-      full_formula <- as.formula(paste(response_formula, snp_formula, "+", covariates_str))
+  
+  #Combine components into formula that will execute model fitting when used in below
+  full_formula <- as.formula(paste(response_formula, snp_formula, "+", covariates_str))
+  print(full_formula)
   
   #Model fitting call using Rs glm
   model <- glm(
@@ -50,7 +50,7 @@ fit_glms <- function(response, snp_columns, covariates, data) {
 
 #Function to fit General Estimating Equations (GEEs) in childrens and full cohort subsets
 fit_gees <- function(response, snp_columns, covariates, data, id_column, correlation_structure = "exchangeable") {
- 
+  
   #Formula construction
   snp_formula <- paste(snp_columns, collapse = " + ")
   response_formula <- paste(response, "~")
@@ -58,8 +58,8 @@ fit_gees <- function(response, snp_columns, covariates, data, id_column, correla
   
   
   full_formula <- as.formula(paste(response_formula, snp_formula, "+", covariates_str))
-
-#Model fitting
+  
+  #Model fitting
   gee_model <- geeglm(
     formula = full_formula,
     data = data,
@@ -67,7 +67,7 @@ fit_gees <- function(response, snp_columns, covariates, data, id_column, correla
     family = gaussian(),  
     corstr = correlation_structure #assign from global variable in master controller script
   )
-
+  
   return(summary(gee_model))
 }
 
@@ -92,8 +92,8 @@ model_dataframe <- function(model_summary, trait_category, trait, cohort, p_col)
     mutate(trait = trait) %>%
     mutate(cohort = cohort)
   
-    rownames(coefficients_df) <- NULL
-
+  rownames(coefficients_df) <- NULL
+  
   return(coefficients_df)
 }
 
@@ -105,9 +105,10 @@ model_dataframe <- function(model_summary, trait_category, trait, cohort, p_col)
 ## ----------------- 2.1 Diet Phenotype Models ----------------- ##
 
 #First we will apply our function to fit a GLM for each trait of interest within the diet response columns
-diet_models_adult <- setNames(lapply(diet_response_columns, function(response) {
-  fit_glms(response, snp_columns, covariates, adult_data)
-}), diet_response_columns) 
+
+kcal_adult_model <- fit_glms("kcal", snp_columns, covariates, adult_data)
+
+kcal_adult_model
 
 
 #initialize list
@@ -174,7 +175,7 @@ for(trait in names(diet_models_children)) {
 children_diet_coeffs <- do.call(rbind, diet_model_dfs) %>%
   arrange(adjusted_p)
 rownames(children_diet_coeffs) <- NULL
-                                                
+
 ## ----------------- 3.2 Sleep Phenotype Models ----------------- ##
 
 sleep_models_children <- setNames(lapply(sleep_response_columns, function(response) {
@@ -210,7 +211,6 @@ diet_models_full <- setNames(lapply(diet_response_columns, function(response) {
   fit_gees(response, snp_columns, covariates, full_cohort_data, id_column = "fid", correlation_structure)
 }), diet_response_columns)
 
-diet_model_dfs <- list()
 
 #save summaries to list
 for(trait in names(diet_models_full)) {

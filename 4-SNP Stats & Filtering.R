@@ -42,58 +42,76 @@ Genotype_long_adult <- Genotype_adult %>%
     Allele_2 = substr(Genotype, 2, 2)
   )
 
-#Now we can generate a summary table describing each SNP in more detail for the adult cohort first.
-adult_snp_stats <- Genotype_long_adult %>%
-  filter(!(Allele_1 == "-" | Allele_2 == "-")) %>%
-  group_by(rsID) %>%
-  summarise(
-    Genotypes = paste(unique(Genotype), collapse = ", "),
-    
-    G_prop = (sum(Allele_1 == "G") + sum(Allele_2 == "G")) / (2 * (n())),
-    A_prop = (sum(Allele_1 == "A") + sum(Allele_2 == "A")) / (2 * (n())),
-    T_prop = (sum(Allele_1 == "T") + sum(Allele_2 == "T")) / (2 * (n())),
-    C_prop = (sum(Allele_1 == "C") + sum(Allele_2 == "C")) / (2 * (n())),
-    
-    Ref_Allele = case_when(
-      G_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "G",
-      A_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "A",
-      T_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "T",
-      C_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "C"
-    ),
-    
-    Alt_Allele = case_when(
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) == 1 ~ "/",
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) > 2 ~ {
-        temp <- sort(c(G = G_prop, A = A_prop, T = T_prop, C = C_prop), decreasing = TRUE)
-        paste(names(temp)[2], "/", names(temp)[3], sep = "")
-      },
-      TRUE ~ {
-        temp <- c(G = G_prop, A = A_prop, T = T_prop, C = C_prop)
-        names(sort(temp, decreasing = TRUE))[2]
-      }
-    ),
-    
-    Ref_Allele_Prop = case_when(
-      Ref_Allele == "A" ~ A_prop,
-      Ref_Allele == "G" ~ G_prop,
-      Ref_Allele == "C" ~ C_prop,
-      Ref_Allele == "T" ~ T_prop
-    ),
-    
-    Minor_Allele_Prop = case_when(
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) == 1 ~ as.character(0.00),
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) > 2 ~ {
-        temp <- sort(c(G = G_prop, A = A_prop, T = T_prop, C = C_prop), decreasing = TRUE)
-        paste(as.character(temp[2]), "/", as.character(temp[3]), sep = "")
-      },
-      TRUE ~ {
-        temp <- c(G = G_prop, A = A_prop, T = T_prop, C = C_prop)
-        as.character(min(temp[temp > 0]))
-      }
-    )
+#Function to compute statistics for SNPs from genotype long
+genotype_summary <- function(Genotype_long_adult, snp) {
+  # Filter for the SNP of interest
+  filtered_df <- Genotype_long_adult %>%
+    filter(rsID == snp)
+  
+  # Calculate allele frequencies and proportions
+  combined_alleles <- bind_rows(
+    filtered_df %>% group_by(Allele_1) %>% summarize(count = n()) %>% rename(allele = Allele_1),
+    filtered_df %>% group_by(Allele_2) %>% summarize(count = n()) %>% rename(allele = Allele_2)
+  ) %>%
+    group_by(allele) %>%
+    summarize(
+      total_count = sum(count)
+    ) %>%
+    mutate(proportion = total_count / (nrow(filtered_df) * 2))
+  
+  # Determine reference and alternate alleles
+  if (length(unique(filtered_df$Genotype)) < 2) {
+    Ref_allele <- combined_alleles$allele[1]  # Assign the only allele as Ref_allele
+    Ref_allele_prop <- 1  # All are reference alleles
+    Alt_allele <- "/"
+    Alt_allele_prop <- 0
+  } else {
+    # If there are at least 2 unique genotypes, calculate reference and alternate alleles and their proportions
+    Ref_allele <- combined_alleles$allele[which.max(combined_alleles$proportion)]
+    Alt_allele <- combined_alleles$allele[which.min(combined_alleles$proportion)]
+    Ref_allele_prop <- combined_alleles$proportion[which.max(combined_alleles$proportion)]
+    Alt_allele_prop <- combined_alleles$proportion[which.min(combined_alleles$proportion)]
+  }
+  # Calculate genotype counts
+  filtered_df <- filtered_df %>%
+    mutate(num_genotype = case_when(
+      Allele_1 == Ref_allele & Allele_2 == Ref_allele ~ 0,  # Homozygous reference
+      Allele_1 == Alt_allele & Allele_2 == Alt_allele ~ 2,  # Homozygous alternate
+      Allele_1 != Allele_2 ~ 1  # Heterozygous
+    ))
+  
+  genotype_counts <- filtered_df %>%
+    group_by(num_genotype) %>%
+    summarize(count = n())
+  
+  # Extract individual counts for each genotype
+  homozygous_ref <- genotype_counts$count[genotype_counts$num_genotype == 0] %>% ifelse(length(.) == 0, 0, .)
+  heterozygous <- genotype_counts$count[genotype_counts$num_genotype == 1] %>% ifelse(length(.) == 0, 0, .)
+  homozygous_alt <- genotype_counts$count[genotype_counts$num_genotype == 2] %>% ifelse(length(.) == 0, 0, .)
+  
+  genotypes <- unique(filtered_df$Genotype)
+  
+  # Create the output data frame
+  snp_df <- data.frame(
+    rsID = snp,
+    Genotypes = I(list(genotypes)),  # Wrap in list to keep as one cell
+    Ref_Allele = Ref_allele,
+    Alt_Allele = Alt_allele,
+    Ref_allele_prop = Ref_allele_prop,
+    Alt_allele_prop = Alt_allele_prop,
+    hzREF = homozygous_ref,
+    htz = heterozygous,
+    hzALT = homozygous_alt
   )
+  
+  return(snp_df)
+}
+
+adult_snp_stats <- do.call(rbind, lapply(snp_columns, function(rsID) genotype_summary(Genotype_long_adult, rsID)))
 
 ## --------------- 1.2 Childrens Dataset ------------------- ##
+
+#Repeating for childrens data
 
 #Reassign snp columns for children dataset, although will be identical
 snp_columns <- get_snp_columns(child_preprocessed)
@@ -113,66 +131,18 @@ Genotype_long_children <- Genotype_children %>%
     Allele_2 = substr(Genotype, 2, 2)
   )
 
-#And generating the stats dataframe
-children_snp_stats <- Genotype_long_children %>%
-  filter(!(Allele_1 == "-" | Allele_2 == "-")) %>%
-  group_by(rsID) %>%
-  summarise(
-    Genotypes = paste(unique(Genotype), collapse = ", "),
-    
-    G_prop = (sum(Allele_1 == "G") + sum(Allele_2 == "G")) / (2 * (n())),
-    A_prop = (sum(Allele_1 == "A") + sum(Allele_2 == "A")) / (2 * (n())),
-    T_prop = (sum(Allele_1 == "T") + sum(Allele_2 == "T")) / (2 * (n())),
-    C_prop = (sum(Allele_1 == "C") + sum(Allele_2 == "C")) / (2 * (n())),
-    
-    Ref_Allele = case_when(
-      G_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "G",
-      A_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "A",
-      T_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "T",
-      C_prop == max(G_prop, A_prop, T_prop, C_prop) ~ "C"
-    ),
-    
-    Alt_Allele = case_when(
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) == 1 ~ "/",
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) > 2 ~ {
-        temp <- sort(c(G = G_prop, A = A_prop, T = T_prop, C = C_prop), decreasing = TRUE)
-        paste(names(temp)[2], "/", names(temp)[3], sep = "")
-      },
-      TRUE ~ {
-        temp <- c(G = G_prop, A = A_prop, T = T_prop, C = C_prop)
-        names(sort(temp, decreasing = TRUE))[2]
-      }
-    ),
-    
-    Ref_Allele_Prop = case_when(
-      Ref_Allele == "A" ~ A_prop,
-      Ref_Allele == "G" ~ G_prop,
-      Ref_Allele == "C" ~ C_prop,
-      Ref_Allele == "T" ~ T_prop
-    ),
-    
-    Minor_Allele_Prop = case_when(
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) == 1 ~ as.character(0.00),
-      sum(c(G_prop, A_prop, T_prop, C_prop) > 0) > 2 ~ {
-        temp <- sort(c(G = G_prop, A = A_prop, T = T_prop, C = C_prop), decreasing = TRUE)
-        paste(as.character(temp[2]), "/", as.character(temp[3]), sep = "")
-      },
-      TRUE ~ {
-        temp <- c(G = G_prop, A = A_prop, T = T_prop, C = C_prop)
-        as.character(min(temp[temp > 0]))
-      }
-    )
-  )
+children_snp_stats <- do.call(rbind, lapply(snp_columns, function(rsID) genotype_summary(Genotype_long_children, rsID)))
 
-#Filtering based on MAF
+
+#FILTERING BASED ON MAF
 exclude_snps_adult <- adult_snp_stats %>%
-  filter(Minor_Allele_Prop < minor_allele_threshold) %>%
-  rename(MAF_adult = "Minor_Allele_Prop") %>%
+  filter(Alt_allele_prop < minor_allele_threshold) %>%
+  rename(MAF_adult = "Alt_allele_prop") %>%
   select(rsID, MAF_adult)
 
 exclude_snps_children <- children_snp_stats %>%
-  filter(Minor_Allele_Prop < minor_allele_threshold) %>%
-  rename(MAF_children = "Minor_Allele_Prop") %>%
+  filter(Alt_allele_prop < minor_allele_threshold) %>%
+  rename(MAF_children = "Alt_allele_prop") %>%
   select(rsID, MAF_children)
 
 #This will be used to remove snps at the end of the script
@@ -187,14 +157,35 @@ exclude_snps <- as.character(exclude_snps_df$rsID)
 ## ----------------- 2.1 Adult Dataset ----------------- ##
 
 #Extract Genotype information only, keeping in wide format
-Genotype_matrix_adult <- as.matrix(adult_preprocessed %>%
-  select(all_of(snp_columns)))
+Genotype_matrix_adult <- adult_preprocessed %>%
+  select(all_of(snp_columns))
+
+Genotype_matrix_adult <- as.matrix(Genotype_matrix_adult)
 
 #Set rownames from pid in original dataset
 rownames(Genotype_matrix_adult) <- adult_preprocessed$pid
 
-#Apply function from CONFIG file to encode genotypes numerically. Note that this matrix will have NA wherever there is missing genotype information.
-Genotype_matrix_adult <- apply(Genotype_matrix_adult, 2, encode_genotype)
+# Get the intersection of rsID between both datasets
+common_rsIDs <- intersect(colnames(Genotype_matrix_adult), adult_snp_stats$rsID)
+
+# Subset Genotype_matrix_adult to keep only common SNPs
+Genotype_matrix_adult <- Genotype_matrix_adult[, common_rsIDs]
+
+# Subset adult_snp_stats to keep only common SNPs
+
+# Choose a specific SNP (e.g., rs10995245)
+snp_columns_adult <- colnames(Genotype_matrix_adult)
+
+for (rsID in snp_columns_adult) {
+  
+  # Extract the column for the current SNP
+  snp_column <- Genotype_matrix_adult[, rsID]
+  
+  #Apply the encode_genotype function and update the column with the encoded values
+  Genotype_matrix_adult[, rsID] <- encode_genotype(snp_column, rsID, adult_snp_stats)
+  
+}
+
 
 #Now using snpStats package to compute LD stats
 snp_matrix <- new("SnpMatrix", Genotype_matrix_adult)
@@ -202,7 +193,7 @@ colnames(snp_matrix) <- colnames(Genotype_matrix_adult)
 rownames(snp_matrix) <- rownames(Genotype_matrix_adult)
 
 #Now, calculating ld and viewing results for all SNPs pairwise
-ld_results_adult <- ld(snp_matrix, depth=10, stats=c("D.prime", "R.squared"))
+ld_results_adult <- ld(snp_matrix, depth=3, stats=c("D.prime", "R.squared"))
 
 #Generating dataframes from results
 ld_D_prime_adult <- as.data.frame(as.matrix(ld_results_adult[["D.prime"]]))
@@ -210,23 +201,60 @@ ld_R_squared_adult <- as.data.frame(as.matrix(ld_results_adult[["R.squared"]]))
 
 Genetic_STATS <- list(genotype_matrix_adult = as.data.frame(Genotype_matrix_adult),geno_long_adult = Genotype_long_adult, geno_long_children = Genotype_long_children, 
                       
-SNP_Stats = list(adult = adult_snp_stats,child = children_snp_stats),
+                      SNP_Stats = list(adult = adult_snp_stats,child = children_snp_stats),
                       
-LD_Stats = list(D_prime_adult = ld_D_prime_adult,R_sqr_adult = ld_R_squared_adult)
-
+                      LD_Stats = list(D_prime_adult = ld_D_prime_adult,R_sqr_adult = ld_R_squared_adult)
+                      
 )
+
+ld_R_squared_adult <- ld_R_squared_adult %>% 
+  rownames_to_column(var = "Variant1")
+
+#getting long format
+ld_R_squared_adult_long <- ld_R_squared_adult %>% 
+  pivot_longer(cols = -Variant1, names_to = "Variant2", values_to = "R^2_score")
+
+#remove self comparisons (not neccesary but makes things clearer)
+long_ld_R_squared_adult_longdf <- ld_R_squared_adult_long %>% 
+  filter(Variant1 != Variant2)
+
+long_ld_R_squared_adult_longdf$`R^2_score`<- as.numeric(long_ld_R_squared_adult_longdf$`R^2_score`)
+
+long_ld_R_squared_adult_longdf <- ld_R_squared_adult_long %>% 
+  filter(`R^2_score` > 0.2)
 
 ## ----------------- 2.2 Childrens Dataset ----------------- ##
 
 #Extract Genotype information only, keeping in wide format
-Genotype_matrix_children <- as.matrix(child_preprocessed %>%
-                                     select(all_of(snp_columns)))
+#Extract Genotype information only, keeping in wide format
+Genotype_matrix_children <- child_preprocessed %>%
+  select(all_of(snp_columns))
+
+Genotype_matrix_children <- as.matrix(Genotype_matrix_children)
 
 #Set rownames from pid in original dataset
 rownames(Genotype_matrix_children) <- child_preprocessed$pid
 
-#Apply function from CONFIG file to encode genotypes numerically. Note that this matrix will have NA wherever there is missing genotype information.
-Genotype_matrix_children <- apply(Genotype_matrix_children, 2, encode_genotype)
+# Get the intersection of rsID between both datasets
+common_rsIDs <- intersect(colnames(Genotype_matrix_children), children_snp_stats$rsID)
+
+# Subset Genotype_matrix_adult to keep only common SNPs
+Genotype_matrix_children <- Genotype_matrix_children[, common_rsIDs]
+
+# Subset adult_snp_stats to keep only common SNPs
+
+# Choose a specific SNP (e.g., rs10995245)
+snp_columns_children <- colnames(Genotype_matrix_children)
+
+for (rsID in snp_columns_children) {
+  
+  # Extract the column for the current SNP
+  snp_column <- Genotype_matrix_children[, rsID]
+  
+  # Apply the encode_genotype function and update the column with the encoded values
+  Genotype_matrix_children[, rsID] <- encode_genotype(snp_column, rsID, children_snp_stats)
+  
+}
 
 #Now using snpStats package to compute LD stats
 snp_matrix_children <- new("SnpMatrix", Genotype_matrix_children)
@@ -241,8 +269,23 @@ ld_D_prime_child <- as.data.frame(as.matrix(ld_results_children[["D.prime"]]))
 ld_R_squared_child <- as.data.frame(as.matrix(ld_results_children[["R.squared"]]))
 
 Genotype_matrix_adult <- rownames_to_column(as.data.frame(Genotype_matrix_adult), var = "pid")
-
 Genotype_matrix_children <- rownames_to_column(as.data.frame(Genotype_matrix_children), var = "pid")
+
+ld_R_squared_child <- ld_R_squared_child %>% 
+  rownames_to_column(var = "Variant1")
+
+#putting in long format
+ld_R_squared_child_long <- ld_R_squared_child %>% 
+  pivot_longer(cols = -Variant1, names_to = "Variant2", values_to = "R^2_score")
+
+#Removing self comparisons
+long_ld_R_squared_child_longdf <- ld_R_squared_child_long %>% 
+  filter(Variant1 != Variant2)
+
+long_ld_R_squared_child_longdf$`R^2_score`<- as.numeric(long_ld_R_squared_child_longdf$`R^2_score`)
+
+long_ld_R_squared_child_longdf <- ld_R_squared_child_long %>% 
+  filter(`R^2_score` > 0.2)
 
 #**_____________________________________________________**#
 ## -------------- 3. CRITERIA FILTERING ---------------- ##
@@ -255,6 +298,8 @@ Genotype_matrix_adult <- Genotype_matrix_adult %>%
 Genotype_matrix_children <- Genotype_matrix_children %>%
   select(-all_of(exclude_snps))
 
+cat("\n")
+cat("\n")
 print(paste(as.character(nrow(exclude_snps_df)), "SNPs excluded based on minor allele frequency < ", minor_allele_threshold))
 
 #**_____________________________________________________**#
@@ -336,15 +381,22 @@ children_merge <- children_data %>%
 
 full_cohort_data <- rbind(adult_merge, children_merge)
 
+#Convert BMI column to numeric for each final dataset
+adult_data$bmi <- as.numeric(adult_data$bmi)
+children_data$bmi <- as.numeric(children_data$bmi)
+full_cohort_data$bmi <- as.numeric(full_cohort_data$bmi)
+
 #Adding to database list object
 Database <- c(Database, list('Complete Datasets' = list("Adults" = adult_data, "Children" = children_data, "Full Cohort" = full_cohort_data)))
-
+citation("snpStats")
 rm(adult_merge,children_merge, full_cohort_data, adult_data, children_data)
-
-#NEED TO REVIEW DOCUMENTATION FOR NAs in resulting dataframes here.
 
 #AT THE END
 
 #Clean Env
 
 rm(adult_snp_stats, children_snp_stats, Genotype_long_adult, Genotype_long_children,ld_D_prime_adult, ld_R_squared_adult, ld_results_adult, Genotype_matrix_adult, ld_results_children, ld_D_prime_child, ld_R_squared_child, Genotype_matrix_children, Genotype_adult, Genotype_children, adult_preprocessed, child_preprocessed, exclude_snps_adult, exclude_snps_children, exclude_snps_df)
+
+
+
+

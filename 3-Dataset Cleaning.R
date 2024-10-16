@@ -26,7 +26,7 @@ children_dataset <- read.csv("final_child.csv")
 
 #First make a general function to check for any form of missing data in a given column
 check_missing <- function(column) {
-  is.na(column) | column == "NA" | column == ""
+  is.na(column) | column == "NA" | column == "" | column == "N/A (pregnant)" #count this last one for bmi specifically in adult dataset
 }
 
 #Examine how many participants are missing data in any of the dietary columns.
@@ -59,13 +59,11 @@ Missing_demos_adult_df <- adult_dataset %>%
 
 children_dataset <- children_dataset %>%
   filter(!(pid %in% Missing_diet_child_df$pid)) %>%
-  filter(!(pid %in% Missing_demos_child_df))
+  filter(!(pid %in% Missing_demos_child_df$pid))
 
 adult_dataset <- adult_dataset %>%
   filter(!(pid %in% Missing_diet_adult_df$pid)) %>%
-  filter(!(pid %in% Missing_demos_adult_df))
-
-
+  filter(!(pid %in% Missing_demos_adult_df$pid))
 
 #**_____________________________________**#
 ## ----- 2. MISSING SLEEP DATA --------- ##
@@ -176,9 +174,6 @@ Missing_snp_adult_df <- adult_dataset %>%
   filter(NA_Count + `-- Count` > 0) %>%
   select(pid, NA_Count, `-- Count`)
 
-# Print the resulting dataframe for adult_dataset
-print(Missing_snp_adult_df)
-
 Missing_snp_child_df <- children_dataset %>%
   select(pid, all_of(snp_columns)) %>%
   rowwise() %>%
@@ -190,7 +185,12 @@ Missing_snp_child_df <- children_dataset %>%
   filter(NA_Count + `-- Count` > 0) %>%
   select(pid, NA_Count, `-- Count`)
 
-#Only a couple of participants in each of the adult and children cohorts are missing a single SNP, which we will leave in the dataset for now.
+
+children_dataset <- children_dataset %>%
+  filter(!(pid %in% Missing_snp_child_df$pid))
+
+adult_dataset <- adult_dataset %>%
+  filter(!(pid %in% Missing_snp_adult_df$pid))
 
 setwd(Output_Dir)
 
@@ -245,9 +245,12 @@ adult_demos_na <- adult_demos %>%
   filter(is.na(bmi) | bmi == " " | bmi == "NA")
 nrow(adult_demos_na)
 
+
+
 'Sleep Data' <- list(Adult = adult_sleep, Children = children_sleep)
 'Diet Data' <- list(Adult = adult_diet, Children = children_diet)
 'Demographic Data' <- list(Adult = adult_demos, Children = children_demos)
 
+
 #Clean Env
-rm(adult_dataset,children_dataset,Missing_snp_adult_df,Missing_snp_child_df, unique_snps_adult, unique_snps_children, excluded_children, excluded_adults, Missing_diet_adult_df, Missing_diet_child_df, diet_columns,sleep_columns, adult_diet,adult_sleep,children_diet,children_sleep,adult_demos,children_demos, too_few_nights_a,too_few_nights_c, too_few_nights, Missing_demos_adult_df, Missing_demos_child_df)
+rm(adult_dataset,children_dataset,Missing_snp_adult_df,Missing_snp_child_df, unique_snps_adult, unique_snps_children, excluded_children, excluded_adults, Missing_diet_adult_df, Missing_diet_child_df, diet_columns,sleep_columns, adult_diet,adult_sleep,children_diet,children_sleep,adult_demos,children_demos, too_few_nights_a,too_few_nights_c, too_few_nights, Missing_demos_adult_df, Missing_demos_child_df, children_demos_na, adult_demos_na)

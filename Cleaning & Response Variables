@@ -1,0 +1,249 @@
+#** ------ CLEANING & RESPONSE VARIABLES ------- **#
+# =============================================== #
+#    Zach Ribau  |  June 18, 2024    
+rm(list=ls())
+#**_____________________________________________________**#
+## -------------------- CONFIG ------------------------- ##
+
+source(file.path(dirname(rstudioapi::getActiveDocumentContext()$path), "Config", "config.R"))
+
+Input_Dir <- set_dir(Dataset_Cleaning)
+Output_Dir <- set_dir(SNP_Stats_Filtering)
+
+setwd(Input_Dir)
+
+#**_____________________________________________________**#
+## --------------------- 1. DATA ------------------------ ##
+
+#Lets start by loading in the diet/demo and genotype df's
+adult <- read.csv("final_adult.csv")
+children <- read.csv("final_child.csv")
+
+#and reading in the adult and child sleep csv's
+sleep <- read.csv("sleep.csv")
+
+##**_____________________________________________________**##
+## ------------- 2. SLEEP RESPONSE VARIABLES ------------- ##
+
+## DERIVING MEAN SLEEP AND WAKE TIMES ##
+
+#Becuase you cannot perform mathematical operations on time data right out of the gate, we will need to create columns to represent sleep and wake times as numeric by computing relative times from midnight.
+
+#Convert the time columns to representations of time since midnight
+sleep <- sleep %>%
+  mutate(
+    IN_DATETIME = as.POSIXct(paste(IN_DATE_TIME, IN_TIME), format="%Y-%m-%d %I:%M %p"),
+    OUT_DATETIME = as.POSIXct(paste(OUT_DATE_TIME, OUT_TIME), format="%Y-%m-%d %I:%M %p"),
+    IN_TIME_minutes = hour(IN_DATETIME) * 60 + minute(IN_DATETIME), #calculate minutes from midnight
+    OUT_TIME_minutes = hour(OUT_DATETIME) * 60 + minute(OUT_DATETIME)
+  )
+
+#Adjust for relativity around minute for later calc of standard dev
+sleep <- sleep %>%
+  mutate(
+    adjusted_IN_TIME_minutes = if_else(as.Date(IN_DATE_TIME) == as.Date(OUT_DATE_TIME), 
+                                       1440 + IN_TIME_minutes, 
+                                       IN_TIME_minutes)
+  )
+
+#Compute mean minutes from midnight for each user
+mean_times <- sleep %>%
+  group_by(pid) %>%
+  summarise(
+    mean_IN_TIME_minutes = mean(adjusted_IN_TIME_minutes, na.rm = TRUE),
+    mean_OUT_TIME_minutes = mean(OUT_TIME_minutes, na.rm = TRUE)
+  )
+
+#Reconstruct hour and minute time into 24-hour time format
+mean_times <- mean_times %>%
+  mutate(
+    mean_IN_HOUR = as.integer(floor(mean_IN_TIME_minutes / 60)),
+    mean_IN_MINUTE = as.integer(round(mean_IN_TIME_minutes %% 60)),
+    mean_OUT_HOUR = as.integer(floor(mean_OUT_TIME_minutes / 60)),
+    mean_OUT_MINUTE = as.integer(round(mean_OUT_TIME_minutes %% 60)),
+    mean_IN_TIME_24 = sprintf("%02d:%02d", mean_IN_HOUR, mean_IN_MINUTE),
+    mean_OUT_TIME_24 = sprintf("%02d:%02d", mean_OUT_HOUR, mean_OUT_MINUTE)
+  ) %>%
+  select(pid, mean_IN_TIME_24, mean_OUT_TIME_24, mean_IN_TIME_minutes, mean_OUT_TIME_minutes)
+
+#Now summarize with  means of sleep columns, as well as total wear nights
+sleep_summary <- sleep %>%
+  group_by(pid) %>%
+  summarise(
+    Nights = n(),
+    Mean_TST = mean(TST, na.rm = TRUE),
+    Mean_SE = mean(SE, na.rm = TRUE),
+    Mean_WASO = mean(WASO, na.rm = TRUE), 
+    dataset = first(dataset)
+  )
+
+## SPLITTING INTO ADULT AND CHILDREN ##
+adult_sleep_summary <- sleep_summary %>%
+  filter(dataset == "parent")
+
+unique(sleep$dataset)
+
+#and child
+child_sleep_summary <- sleep_summary %>%
+  filter(dataset == "toddler" | dataset == "preschooler_schoolage")
+
+#Finally, we will calculate sleep regularity within each subset.
+
+## ADULT SLEEP REGULARITY ##
+
+sleep_adult <- sleep %>%
+  filter(dataset == "parent")
+
+#Define which columns
+adult_regularity <- sleep_adult %>%
+  group_by(pid) %>%
+  summarise(
+    SD_sleep_onset = sd(adjusted_IN_TIME_minutes, na.rm = TRUE),
+    SD_sleep_offset = sd(OUT_TIME_minutes, na.rm = TRUE),
+    SD_TST = sd(TST, na.rm = TRUE),
+    SD_SE = sd(SE, na.rm = TRUE)
+  )
+
+#Now create an overall regularity score by taking a mean of each participants min-max scaled sd across each column - subtracting from 1 to flip the relationship so that higher values correspond to more regular sleep patterns. 
+adult_regularity <- adult_regularity %>%
+  mutate(
+    Regularity = 1 - rowMeans(cbind(
+      (SD_sleep_onset - min(SD_sleep_onset, na.rm = TRUE)) /(max(SD_sleep_onset, na.rm = TRUE) - min(SD_sleep_onset, na.rm = TRUE)),
+      (SD_sleep_offset - min(SD_sleep_offset, na.rm = TRUE)) / (max(SD_sleep_offset, na.rm = TRUE) - min(SD_sleep_offset, na.rm = TRUE)),
+      (SD_TST - min(SD_TST, na.rm = TRUE)) / (max(SD_TST, na.rm = TRUE) - min(SD_TST, na.rm = TRUE)),
+      (SD_SE - min(SD_SE, na.rm = TRUE)) / (max(SD_SE, na.rm = TRUE) - min(SD_SE, na.rm = TRUE))), na.rm = TRUE)
+  )
+
+## CHILDREN SLEEP REGULARITY ##
+
+sleep_children <- sleep %>%
+  filter(dataset == "toddler" | dataset == "preschooler_schoolage")
+
+child_regularity <- sleep_children %>%
+  group_by(pid) %>%
+  summarise(
+    SD_sleep_onset = sd(adjusted_IN_TIME_minutes, na.rm = TRUE),
+    SD_sleep_offset = sd(OUT_TIME_minutes, na.rm = TRUE),
+    SD_TST = sd(TST, na.rm = TRUE),
+    SD_SE = sd(SE, na.rm = TRUE)
+  )
+
+child_regularity <- child_regularity %>%
+  mutate(
+    Regularity = 1 - rowMeans(cbind(
+      (SD_sleep_onset - min(SD_sleep_onset, na.rm = TRUE)) /(max(SD_sleep_onset, na.rm = TRUE) - min(SD_sleep_onset, na.rm = TRUE)),
+      (SD_sleep_offset - min(SD_sleep_offset, na.rm = TRUE)) / (max(SD_sleep_offset, na.rm = TRUE) - min(SD_sleep_offset, na.rm = TRUE)),
+      (SD_TST - min(SD_TST, na.rm = TRUE)) / (max(SD_TST, na.rm = TRUE) - min(SD_TST, na.rm = TRUE)),
+      (SD_SE - min(SD_SE, na.rm = TRUE)) / (max(SD_SE, na.rm = TRUE) - min(SD_SE, na.rm = TRUE))), na.rm = TRUE)
+  )
+
+#Now lets merge all regularity data into the sleep summary dataframes
+
+adult_sleep_summary <- merge(adult_sleep_summary, adult_regularity, by = "pid")
+
+child_sleep_summary <- merge(child_sleep_summary, child_regularity, by = "pid")
+
+#finally, we can merge the mean times into the sleep summary dataframes
+
+adult_sleep_summary <- merge(adult_sleep_summary, mean_times, by = "pid")
+
+child_sleep_summary <- merge(child_sleep_summary, mean_times, by = "pid")
+
+#**_____________________________________________________**#
+## ----------------- 3. DIET VARIABLES ------------------ ##
+
+
+
+
+
+
+
+
+
+
+#**_________________________________________________________**#
+# -------- 6. DEMOGRAPHIC DATA EXPLORATION & SUMMARY -------- #
+
+unique_values_adult <- unique(unlist(adult[, 61:70]))
+
+supps <- c("Magnesium 500 mg",
+           "Magnesium",
+           "Magnesium gylcinate",
+           "melatonin",
+           "Melatonin",
+           "Cannabis",
+           "5-HTP",
+           "Calcium and magnesium",
+           "Magnesium supplement",
+           "Calcium/Magnesium 500mg",
+           "Magnesium Citrate Powder 1 tsp daily",
+           "Magnesium Citrate. 300 mg (2-4 times/week)",
+           "1 pill melatonin",
+           "200mg Magnesium",
+           "Magnesium 2 pills daily",
+           "Magnesium Bis-Glycinate",
+           "Magnesium 200 mg",
+           "Melatonin, 3mg")
+
+
+adult <- adult %>%
+  rowwise() %>%
+  mutate(Supplement_Affecting_Sleep = ifelse(any(c_across(61:70) %in% supps), "Y", "N"))
+
+Supp_Reasons <- unique(unlist(adult[, 71:81]))
+
+sleep_reasons <- c("More restful sleep",
+                   "help with sleep",
+                   "Naturopath recommendation for sleep/muscle rest",
+                   "for sleep as needed",
+                   "1 capsule of 3 mg daily, to help sleep",
+                   "Sleep",
+                   "I want to fall asleep fast, sleep is precious to me",
+                   "Help sleeping",
+                   "Mood and sleep",
+                   "Helping with growing pains and sleep",
+                   "Sleep/stress; general health",
+                   "Doctor prescribed for sleep",
+                   "Sleep, anxiety, migraines, sickness etc- use when required",
+                   "2-5 times per week, general health for sleep and headaches",
+                   "Sleep/restless legs",
+                   "Taken approximately once every 1 to 2 weeks to get a good night sleep")
+
+
+adult <- adult %>%
+  rowwise() %>%
+  mutate(Reason_For_Sleep = ifelse(any(c_across(71:81) %in% sleep_reasons), "Y", "N"))
+
+#Finally we make a master column to flag down participants taking sleep supplements
+
+adult <- adult %>%
+  mutate(Sleep_Supplement = ifelse(Reason_For_Sleep == "Y" | Supplement_Affecting_Sleep == "Y", "Y", "N"))
+
+#Create function to make columns specific for conditions of interest and put "Y" if they are reported
+create_condition_columns <- function(data, column_name, conditions) {
+  for (condition in conditions) {
+    # Create a valid column name by replacing spaces with underscores and removing special characters
+    condition_col_name <- gsub("[^[:alnum:]_]", "", gsub(" ", "_", condition))
+    
+    # Use mutate to create the new column
+    data <- data %>%
+      mutate(!!condition_col_name := ifelse(grepl(paste0("(?i)", condition), .data[[column_name]]), "Y", "N"))
+  }
+  return(data)
+}
+
+conditions <- c("Depression", "Anorexia nervosa", "Bulimia nervosa", "Binge eating disorder",
+                "Irritable bowel syndrome", "Ulcerative colitis/Crohn's disease", "Anxiety Disorder")
+
+adult <- create_condition_columns(adult, "illnesses_selected_choice", conditions) #Apply function to list of disorders of interest
+
+#Create calculation for child age
+children <- children %>%
+  mutate(dob = as.Date(dob, format="%Y-%m-%d"),
+         date_ha = as.Date(date_ha, format="%Y-%m-%d"))
+
+children <- children %>%
+  mutate(age_years = round(as.numeric(difftime(date_ha, dob, units = "days")) / 365.25, 2))
+
+adult <- adult %>%
+  select(-Reason_For_Sleep, -Supplement_Affecting_Sleep)

@@ -70,14 +70,88 @@ sleep_diet_SNPs <- rbind(common_sleep_SNPs, common_diet_SNPs) %>%
 ext_snps <- read.table("SNP_List.txt", skip = 1)
 colnames(ext_snps) <- 'SNP'
 
+EXSNP_List <- as.data.frame(ext_snps)
 #add to EBI snp_list
 
 #Generate a simple dataframe list of the final set of SNPs of interest
 SNP_List <- as.data.frame(sleep_diet_SNPs$SNPS)
 colnames(SNP_List) = "SNP"
 
-#Adding external snps
-SNP_List <- rbind(SNP_List, ext_snps) %>%
+# THIS LONG STRING VARIABLE is simply not in use. Rather than commenting out the entire block, this makes it easier to toggle use/not in use without messing up commented vs uncommented lines. NOTE: This part of the code throws an error, and was not used to generate final list of SNPs.
+ranking_code <- '
+sleep_diet_SNPs <- sleep_diet_SNPs %>%
+  rename(SNP = "SNPS") %>%
+  filter(SNP %in% filtered$Final_SNP)
+
+EXSNP_List <- EXSNP_List %>%
+  filter(SNP %in% filtered$Final_SNP)
+
+EBI_sleep2 <- EBI %>%
+  filter(`MAPPED_TRAIT` %in% sleep_traits$Trait)
+
+#Filter EBI Data by relevant EFO Trait search
+
+by_SNP <- EBI_sleep2 %>%
+  group_by(SNPS) %>%
+  summarise(
+    Studies = n_distinct(PUBMEDID), 
+    Genes = paste(unique(MAPPED_GENE), collapse = ", "), 
+    Traits = paste(unique(MAPPED_TRAIT), collapse = ", ")
+  )
+
+
+by_Gene <- EBI_sleep2 %>%
+  group_by(MAPPED_GENE) %>%
+  summarise(
+    Studies = n_distinct(PUBMEDID), 
+    Genes = paste(unique(SNPS), collapse = ", "), 
+    Traits = paste(unique(MAPPED_TRAIT), collapse = ", ")
+  )
+
+unique(EBI_sleep2$`FIRST AUTHOR`)
+
+EBI_sleep2 <- EBI_sleep2 %>%
+  mutate(MAPPED_TRAIT = str_replace_all(MAPPED_TRAIT, "insomnia measurement", "insomnia"))
+
+EBI_sleep2 <- EBI_sleep2 %>%
+  mutate(MAPPED_TRAIT = str_replace_all(MAPPED_TRAIT, "sleep apnea measurement", "sleep apnea"))
+
+EBI_sleep2 <- EBI_sleep2 %>%
+  mutate(MAPPED_TRAIT = str_replace_all(MAPPED_TRAIT, "obstructive sleep apnea", "sleep apnea"))
+
+EBI_sleep2 <- EBI_sleep2 %>%
+  mutate(MAPPED_TRAIT = str_replace_all(MAPPED_TRAIT, "sleep apnea measurement during non-REM sleep", "sleep apnea"))
+
+EBI_sleep2 <- EBI_sleep2 %>%
+  mutate(MAPPED_TRAIT = str_replace_all(MAPPED_TRAIT, "sleep apnea measurement during REM sleep", "sleep apnea"))
+
+EBI_sleep2 <- EBI_sleep2 %>%
+  mutate(SNP_trait_combo = paste(SNPS, MAPPED_TRAIT, sep = " | "))
+
+SNP_trait_combo <- EBI_sleep2 %>%
+  group_by(SNP_trait_combo) %>%
+  summarise(Studies = n_distinct(PUBMEDID),Genes = paste(unique(MAPPED_GENE), collapse = ", ") )
+
+SNP_trait_combo2 <- SNP_trait_combo %>%
+  filter(Studies >= 3) %>%
+  mutate(SNP = str_split(SNP_trait_combo, " \\| ", simplify = TRUE)[, 1])
+
+
+ebi_ranked <- as.data.frame(trimws(unique(SNP_trait_combo2$SNP)))
+
+colnames(ebi_ranked) <- "SNP" 
+
+sleep_diet_snps <- as.data.frame(sleep_diet_SNPs$SNPS)
+colnames(sleep_diet_snps) = "SNP"
+
+ebi_snps <- rbind(ebi_ranked, sleep_diet_snps) %>%
+  distinct(SNP)
+
+SNP_List <- rbind(ebi_snps, ext_snps) %>%
+  distinct(SNP)
+'
+
+SNP_List <- rbind(EXSNP_List, SNP_List) %>%
   distinct(SNP)
 
 #**_____________________________________________________**#
@@ -132,5 +206,7 @@ filter_genotype <- genotype_file %>%
   filter(SNPS %in% SNPs_Confirmed$SNP)
 
 setwd(Output_Dir)
+
+length(unique(filter_genotype$SNPS))
 
 write.csv(filter_genotype, "filtered_genotype_file.csv")
