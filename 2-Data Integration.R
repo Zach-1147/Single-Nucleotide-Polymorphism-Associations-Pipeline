@@ -1,4 +1,3 @@
-
 #** -------- DATA INTEGRATION --------- **#
 # ======================================= #
 #    Zach Ribau  |  June 18, 2024       
@@ -9,7 +8,7 @@
 source(file.path(dirname(rstudioapi::getActiveDocumentContext()$path), "Config", "config.R"))
 
 Input_Dir <- set_dir(Data_Integration)
-Output_Dir <- set_dir(Dataset_Cleaning)
+Output_Dir <- set_dir(Cleaning_Response_Variables)
 
 #**_____________________________________________________________**#
 ## --------------- 1. DIET/DEMOGRAPHIC DATA -------------------- ##
@@ -559,7 +558,7 @@ Missing_genotype_child <- final_child %>%
 
 #removing these observations
 final_child <- final_child %>%
-  filter(!(pid %in% Missing_diet_child$pid))
+  filter(!(pid %in% Missing_genotype_child$pid))
 
 #and now checking for "--"
 genotype_dash_child <- final_child %>%

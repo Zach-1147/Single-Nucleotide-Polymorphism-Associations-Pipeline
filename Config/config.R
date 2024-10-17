@@ -61,10 +61,12 @@ packages <- c("tidyverse", "ggplot2", "readxl", "broom", "data.table", "rentrez"
 
 SNP_Selection <- 1
 Data_Integration <- 2
-Dataset_Cleaning <- 3
-SNP_Stats_Filtering <- 4
-Association_Testing <- 5
-Figures <- 6
+Cleaning_Response_Variables <- 3
+Criteria_Based_Filtering <- 4
+SNP_Stats <- 5
+LD_MAF <- 6
+Association_Testing <- 7
+Figures <- 8
 
 #****************** FUNCTIONS ********************#
 
